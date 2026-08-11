@@ -5,8 +5,7 @@ dns.setServers([
   "8.8.4.4",
 ]);
 
-const dotenv = require("dotenv");
-dotenv.config();
+require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -29,12 +28,40 @@ const app = express();
 connectDB();
 
 // =====================================================
+// FRONTEND URL
+// =====================================================
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+console.log("🌐 Allowed origins:", allowedOrigins);
+
+// =====================================================
 // MIDDLEWARE
 // =====================================================
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow requests without origin
+      // Example: Postman / server-to-server
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS blocked:", origin);
+
+      return callback(
+        new Error(`CORS blocked for origin: ${origin}`)
+      );
+    },
+
     credentials: true,
   })
 );
@@ -78,7 +105,26 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.log(
+        "❌ Socket.IO CORS blocked:",
+        origin
+      );
+
+      return callback(
+        new Error(
+          `Socket.IO CORS blocked for origin: ${origin}`
+        )
+      );
+    },
 
     methods: [
       "GET",
@@ -99,62 +145,74 @@ app.set("io", io);
 // =====================================================
 
 io.on("connection", (socket) => {
-  console.log("🟢 Socket connected:", socket.id);
+  console.log(
+    "🟢 Socket connected:",
+    socket.id
+  );
 
   // ===================================================
   // WELCOME
   // ===================================================
 
   socket.emit("welcome", {
-    message: "Connected to Smart Food Waste real-time server",
+    message:
+      "Connected to Smart Food Waste real-time server",
   });
 
   // ===================================================
   // DONOR WATCHES DONATION
   // ===================================================
 
-  socket.on("donation:tracking-watch", ({ donationId }) => {
-    if (!donationId) {
-      return;
+  socket.on(
+    "donation:tracking-watch",
+    ({ donationId }) => {
+      if (!donationId) {
+        return;
+      }
+
+      const room = `donation:${donationId}`;
+
+      socket.join(room);
+
+      console.log(
+        `👀 Socket ${socket.id} is watching ${room}`
+      );
     }
-
-    const room = `donation:${donationId}`;
-
-    socket.join(room);
-
-    console.log(
-      `👀 Socket ${socket.id} is watching ${room}`
-    );
-  });
+  );
 
   // ===================================================
   // START LIVE TRACKING
   // ===================================================
 
-  socket.on("donation:tracking-start", ({ donationId }) => {
-    if (!donationId) {
-      return;
-    }
-
-    const room = `donation:${donationId}`;
-
-    // NGO joins donation room
-    socket.join(room);
-
-    console.log(`📍 Tracking started: ${donationId}`);
-
-    console.log(
-      `👤 NGO socket ${socket.id} joined ${room}`
-    );
-
-    // Notify donor(s) inside the room
-    socket.to(room).emit(
-      "donation:tracking-started",
-      {
-        donationId,
+  socket.on(
+    "donation:tracking-start",
+    ({ donationId }) => {
+      if (!donationId) {
+        return;
       }
-    );
-  });
+
+      const room = `donation:${donationId}`;
+
+      // NGO joins donation room
+      socket.join(room);
+
+      console.log(
+        `📍 Tracking started: ${donationId}`
+      );
+
+      console.log(
+        `👤 NGO socket ${socket.id} joined ${room}`
+      );
+
+      // Notify donor(s)
+      socket.to(room).emit(
+        "donation:tracking-started",
+        {
+          donationId,
+        }
+      );
+    }
+  );
 
   // ===================================================
   // LOCATION UPDATE
@@ -168,7 +226,6 @@ io.on("connection", (socket) => {
       longitude,
       accuracy,
     }) => {
-      // Validate data
       if (
         !donationId ||
         latitude === undefined ||
@@ -186,8 +243,8 @@ io.on("connection", (socket) => {
         `±${Math.round(accuracy || 0)}m`
       );
 
-      // Send live location to everyone else
-      // inside this donation room.
+      // Send location to everyone else
+      // inside the donation room
       socket.to(room).emit(
         "donation:location-updated",
         {
@@ -204,26 +261,31 @@ io.on("connection", (socket) => {
   // STOP LIVE TRACKING
   // ===================================================
 
-  socket.on("donation:tracking-stop", ({ donationId }) => {
-    if (!donationId) {
-      return;
-    }
-
-    const room = `donation:${donationId}`;
-
-    // Notify donor
-    socket.to(room).emit(
-      "donation:tracking-stopped",
-      {
-        donationId,
+  socket.on(
+    "donation:tracking-stop",
+    ({ donationId }) => {
+      if (!donationId) {
+        return;
       }
-    );
 
-    // NGO leaves room
-    socket.leave(room);
+      const room = `donation:${donationId}`;
 
-    console.log(`⛔ Tracking stopped: ${donationId}`);
-  });
+      // Notify donor
+      socket.to(room).emit(
+        "donation:tracking-stopped",
+        {
+          donationId,
+        }
+      );
+
+      // NGO leaves room
+      socket.leave(room);
+
+      console.log(
+        `⛔ Tracking stopped: ${donationId}`
+      );
+    }
+  );
 
   // ===================================================
   // DISCONNECT
@@ -242,6 +304,16 @@ io.on("connection", (socket) => {
 // =====================================================
 
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔌 Socket.IO running on port ${PORT}`);
+  console.log(
+    `🚀 Server running on port ${PORT}`
+  );
+
+  console.log(
+    `🔌 Socket.IO running on port ${PORT}`
+  );
+
+  console.log(
+    `🌐 Allowed origins:`,
+    allowedOrigins
+  );
 });

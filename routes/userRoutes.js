@@ -9,14 +9,22 @@ const {
 
 const router = express.Router();
 
-// Get logged-in user's profile
+// =====================================================
+// GET LOGGED-IN USER PROFILE
+// GET /api/users/profile
+// =====================================================
+
 router.get(
   "/profile",
   protect,
   getMyProfile
 );
 
-// Update logged-in user's profile
+// =====================================================
+// UPDATE LOGGED-IN USER PROFILE
+// PATCH /api/users/profile
+// =====================================================
+
 router.patch(
   "/profile",
   protect,
