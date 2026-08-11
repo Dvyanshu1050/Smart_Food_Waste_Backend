@@ -28,15 +28,19 @@ const app = express();
 connectDB();
 
 // =====================================================
-// FRONTEND URL
+// FRONTEND URLS
 // =====================================================
 
 const allowedOrigins = [
   "http://localhost:5173",
+  "https://smart-food-waste-frontend.vercel.app",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
-console.log("🌐 Allowed origins:", allowedOrigins);
+console.log(
+  "🌐 Allowed origins:",
+  allowedOrigins
+);
 
 // =====================================================
 // MIDDLEWARE
@@ -55,10 +59,15 @@ app.use(
         return callback(null, true);
       }
 
-      console.log("❌ CORS blocked:", origin);
+      console.log(
+        "❌ CORS blocked:",
+        origin
+      );
 
       return callback(
-        new Error(`CORS blocked for origin: ${origin}`)
+        new Error(
+          `CORS blocked for origin: ${origin}`
+        )
       );
     },
 
@@ -72,13 +81,25 @@ app.use(express.json());
 // ROUTES
 // =====================================================
 
-app.use("/api/auth", authRoutes);
+app.use(
+  "/api/auth",
+  authRoutes
+);
 
-app.use("/api/donations", donationRoutes);
+app.use(
+  "/api/donations",
+  donationRoutes
+);
 
-app.use("/api/users", userRoutes);
+app.use(
+  "/api/users",
+  userRoutes
+);
 
-app.use("/api/admin", adminRoutes);
+app.use(
+  "/api/admin",
+  adminRoutes
+);
 
 // =====================================================
 // HOME
@@ -87,7 +108,8 @@ app.use("/api/admin", adminRoutes);
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "Smart Food Waste API is running",
+    message:
+      "Smart Food Waste API is running",
   });
 });
 
@@ -95,9 +117,11 @@ app.get("/", (req, res) => {
 // HTTP SERVER
 // =====================================================
 
-const PORT = process.env.PORT || 5000;
+const PORT =
+  process.env.PORT || 5000;
 
-const server = http.createServer(app);
+const server =
+  http.createServer(app);
 
 // =====================================================
 // SOCKET.IO
@@ -106,11 +130,14 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
+      // Allow requests without origin
       if (!origin) {
         return callback(null, true);
       }
 
-      if (allowedOrigins.includes(origin)) {
+      if (
+        allowedOrigins.includes(origin)
+      ) {
         return callback(null, true);
       }
 
@@ -170,7 +197,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room = `donation:${donationId}`;
+      const room =
+        `donation:${donationId}`;
 
       socket.join(room);
 
@@ -191,7 +219,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room = `donation:${donationId}`;
+      const room =
+        `donation:${donationId}`;
 
       // NGO joins donation room
       socket.join(room);
@@ -234,17 +263,18 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room = `donation:${donationId}`;
+      const room =
+        `donation:${donationId}`;
 
       console.log(
         `📍 Location update for ${donationId}:`,
         latitude,
         longitude,
-        `±${Math.round(accuracy || 0)}m`
+        `±${Math.round(
+          accuracy || 0
+        )}m`
       );
 
-      // Send location to everyone else
-      // inside the donation room
       socket.to(room).emit(
         "donation:location-updated",
         {
@@ -268,9 +298,9 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room = `donation:${donationId}`;
+      const room =
+        `donation:${donationId}`;
 
-      // Notify donor
       socket.to(room).emit(
         "donation:tracking-stopped",
         {
@@ -278,7 +308,6 @@ io.on("connection", (socket) => {
         }
       );
 
-      // NGO leaves room
       socket.leave(room);
 
       console.log(
@@ -313,7 +342,7 @@ server.listen(PORT, () => {
   );
 
   console.log(
-    `🌐 Allowed origins:`,
+    "🌐 Allowed origins:",
     allowedOrigins
   );
 });
