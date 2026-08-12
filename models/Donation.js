@@ -10,6 +10,15 @@ const donationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
+    },
+
+    // External ID from imported dataset
+    externalId: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true, // <-- Index is defined here, which is perfect.
     },
 
     // =========================
@@ -45,13 +54,7 @@ const donationSchema = new mongoose.Schema(
     unit: {
       type: String,
       required: true,
-      enum: [
-        "meals",
-        "kg",
-        "liters",
-        "packets",
-        "boxes",
-      ],
+      enum: ["meals", "kg", "liters", "packets", "boxes"],
       default: "meals",
     },
 
@@ -65,7 +68,6 @@ const donationSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Donor Latitude
     latitude: {
       type: Number,
       required: true,
@@ -73,7 +75,6 @@ const donationSchema = new mongoose.Schema(
       max: 90,
     },
 
-    // Donor Longitude
     longitude: {
       type: Number,
       required: true,
@@ -82,10 +83,25 @@ const donationSchema = new mongoose.Schema(
     },
 
     // =========================
+    // GEOJSON PICKUP LOCATION
+    // =========================
+
+    pickupCoordinates: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+
+      coordinates: {
+        type: [Number],
+        default: undefined,
+      },
+    },
+
+    // =========================
     // DELIVERY LOCATION
     // =========================
-    // NGO claim ke baad destination
-    // yahan save kiya jayega.
 
     deliveryLocation: {
       type: String,
@@ -93,7 +109,6 @@ const donationSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Beneficiary / Delivery Latitude
     deliveryLatitude: {
       type: Number,
       min: -90,
@@ -101,7 +116,6 @@ const donationSchema = new mongoose.Schema(
       default: null,
     },
 
-    // Beneficiary / Delivery Longitude
     deliveryLongitude: {
       type: Number,
       min: -180,
@@ -146,6 +160,7 @@ const donationSchema = new mongoose.Schema(
         "DELIVERED",
       ],
       default: "AVAILABLE",
+      index: true,
     },
 
     // =========================
@@ -156,6 +171,7 @@ const donationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+      index: true,
     },
 
     claimedAt: {
@@ -182,9 +198,38 @@ const donationSchema = new mongoose.Schema(
   }
 );
 
-// =====================================================
+// =========================
+// GEO LOCATION INDEX
+// =========================
+
+donationSchema.index({
+  pickupCoordinates: "2dsphere",
+});
+
+// =========================
+// USEFUL QUERY INDEXES
+// =========================
+
+donationSchema.index({
+  status: 1,
+  createdAt: -1,
+});
+
+donationSchema.index({
+  donor: 1,
+  createdAt: -1,
+});
+
+donationSchema.index({
+  claimedBy: 1,
+  status: 1,
+});
+
+// ❌ Removed the duplicate externalId index from here!
+
+// =========================
 // MODEL
-// =====================================================
+// =========================
 
 const Donation = mongoose.model(
   "Donation",

@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const Donation = require("../models/Donation");
+const Claim = require("../models/Claim");
 
 // =====================================================
 // SOCKET HELPER
@@ -36,7 +37,7 @@ const createDonation = async (req, res) => {
     } = req.body;
 
     // =========================
-    // VALIDATION
+    // BASIC VALIDATION
     // =========================
 
     if (
@@ -56,14 +57,30 @@ const createDonation = async (req, res) => {
     }
 
     // =========================
+    // QUANTITY VALIDATION
+    // =========================
+
+    if (Number(quantity) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be greater than 0",
+      });
+    }
+
+    // =========================
     // COORDINATE VALIDATION
     // =========================
 
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+
     if (
-      Number(latitude) < -90 ||
-      Number(latitude) > 90 ||
-      Number(longitude) < -180 ||
-      Number(longitude) > 180
+      Number.isNaN(lat) ||
+      Number.isNaN(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
     ) {
       return res.status(400).json({
         success: false,
@@ -72,10 +89,27 @@ const createDonation = async (req, res) => {
     }
 
     // =========================
+    // DATE VALIDATION
+    // =========================
+
+    const pickupDate = new Date(pickupTime);
+    const expiryDate = new Date(expiryTime);
+
+    if (
+      Number.isNaN(pickupDate.getTime()) ||
+      Number.isNaN(expiryDate.getTime())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pickup or expiry date",
+      });
+    }
+
+    // =========================
     // EXPIRY VALIDATION
     // =========================
 
-    if (new Date(expiryTime) <= new Date()) {
+    if (expiryDate <= new Date()) {
       return res.status(400).json({
         success: false,
         message: "Expiry time must be in the future",
@@ -86,7 +120,7 @@ const createDonation = async (req, res) => {
     // PICKUP / EXPIRY VALIDATION
     // =========================
 
-    if (new Date(pickupTime) >= new Date(expiryTime)) {
+    if (pickupDate >= expiryDate) {
       return res.status(400).json({
         success: false,
         message: "Pickup time must be before expiry time",
@@ -100,29 +134,44 @@ const createDonation = async (req, res) => {
     const donation = await Donation.create({
       donor: req.user.id,
 
-      foodType,
+      foodType: foodType.trim(),
       category,
-      quantity,
-      unit,
+      quantity: Number(quantity),
+      unit: unit || "meals",
 
-      pickupLocation,
-      latitude: Number(latitude),
-      longitude: Number(longitude),
+      pickupLocation: pickupLocation.trim(),
 
-      pickupTime,
-      expiryTime,
+      latitude: lat,
+      longitude: lng,
 
-      description,
+      // GeoJSON
+      pickupCoordinates: {
+        type: "Point",
+        coordinates: [lng, lat],
+      },
+
+      pickupTime: pickupDate,
+      expiryTime: expiryDate,
+
+      description: description
+        ? description.trim()
+        : "",
     });
 
     // =========================
-    // POPULATE DONOR
+    // POPULATE DONATION
     // =========================
 
     const populatedDonation =
       await Donation.findById(donation._id)
-        .populate("donor", "name email")
-        .populate("claimedBy", "name email role");
+        .populate(
+          "donor",
+          "name email role"
+        )
+        .populate(
+          "claimedBy",
+          "name email role"
+        );
 
     // =========================
     // SOCKET EVENT
@@ -160,17 +209,30 @@ const createDonation = async (req, res) => {
 // GET AVAILABLE DONATIONS
 // =====================================================
 
-const getAvailableDonations = async (req, res) => {
+const getAvailableDonations = async (
+  req,
+  res
+) => {
   try {
-    const donations = await Donation.find({
-      status: "AVAILABLE",
-      expiryTime: {
-        $gt: new Date(),
-      },
-    })
-      .populate("donor", "name email")
-      .populate("claimedBy", "name email role")
-      .sort({ createdAt: -1 });
+    const donations =
+      await Donation.find({
+        status: "AVAILABLE",
+
+        expiryTime: {
+          $gt: new Date(),
+        },
+      })
+        .populate(
+          "donor",
+          "name email role"
+        )
+        .populate(
+          "claimedBy",
+          "name email role"
+        )
+        .sort({
+          createdAt: -1,
+        });
 
     return res.status(200).json({
       success: true,
@@ -179,7 +241,7 @@ const getAvailableDonations = async (req, res) => {
     });
   } catch (error) {
     console.error(
-      "Get Donations Error:",
+      "Get Available Donations Error:",
       error
     );
 
@@ -194,14 +256,26 @@ const getAvailableDonations = async (req, res) => {
 // GET MY DONATIONS
 // =====================================================
 
-const getMyDonations = async (req, res) => {
+const getMyDonations = async (
+  req,
+  res
+) => {
   try {
-    const donations = await Donation.find({
-      donor: req.user.id,
-    })
-      .populate("donor", "name email")
-      .populate("claimedBy", "name email role")
-      .sort({ createdAt: -1 });
+    const donations =
+      await Donation.find({
+        donor: req.user.id,
+      })
+        .populate(
+          "donor",
+          "name email role"
+        )
+        .populate(
+          "claimedBy",
+          "name email role"
+        )
+        .sort({
+          createdAt: -1,
+        });
 
     return res.status(200).json({
       success: true,
@@ -225,7 +299,10 @@ const getMyDonations = async (req, res) => {
 // CLAIM DONATION
 // =====================================================
 
-const claimDonation = async (req, res) => {
+const claimDonation = async (
+  req,
+  res
+) => {
   try {
     const { id } = req.params;
 
@@ -233,9 +310,8 @@ const claimDonation = async (req, res) => {
     // FIND USER
     // =========================
 
-    const user = await User.findById(
-      req.user.id
-    );
+    const user =
+      await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -251,7 +327,8 @@ const claimDonation = async (req, res) => {
     if (user.isBlocked) {
       return res.status(403).json({
         success: false,
-        message: "Your account has been blocked",
+        message:
+          "Your account has been blocked",
       });
     }
 
@@ -273,8 +350,6 @@ const claimDonation = async (req, res) => {
     // =========================
     // EMAIL VERIFICATION
     // =========================
-    // Registration itself verifies email
-    // because OTP/Resend was removed.
 
     if (user.isEmailVerified !== true) {
       return res.status(403).json({
@@ -317,7 +392,9 @@ const claimDonation = async (req, res) => {
     // STATUS CHECK
     // =========================
 
-    if (donation.status !== "AVAILABLE") {
+    if (
+      donation.status !== "AVAILABLE"
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -340,17 +417,82 @@ const claimDonation = async (req, res) => {
     }
 
     // =========================
-    // CLAIM
+    // PREVENT DONOR CLAIMING
+    // =========================
+
+    if (
+      donation.donor.toString() ===
+      req.user.id
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "You cannot claim your own donation",
+      });
+    }
+
+    // =========================
+    // CREATE CLAIM ID
+    // =========================
+
+    const claimId =
+      `CLM-${Date.now()}-${Math.floor(
+        Math.random() * 1000
+      )}`;
+
+    // =========================
+    // CREATE CLAIM
+    // =========================
+
+    const claim =
+      await Claim.create({
+        claimId,
+
+        donation: donation._id,
+
+        ngo:
+          user.role === "ngo"
+            ? user._id
+            : null,
+
+        volunteer:
+          user.role === "volunteer"
+            ? user._id
+            : null,
+
+        claimedQuantity:
+          donation.quantity,
+
+        unit:
+          donation.unit || "meals",
+
+        claimedAt: new Date(),
+
+        status: "CLAIMED",
+
+        pickupDistanceKm: 0,
+
+        pickupDelayMin: 0,
+
+        deliveryStatus: "Pending",
+      });
+
+    // =========================
+    // UPDATE DONATION
     // =========================
 
     donation.status = "CLAIMED";
-    donation.claimedBy = req.user.id;
-    donation.claimedAt = new Date();
+
+    donation.claimedBy =
+      user._id;
+
+    donation.claimedAt =
+      new Date();
 
     await donation.save();
 
     // =========================
-    // POPULATE
+    // POPULATE DONATION
     // =========================
 
     const populatedDonation =
@@ -359,10 +501,31 @@ const claimDonation = async (req, res) => {
       )
         .populate(
           "donor",
-          "name email"
+          "name email role"
         )
         .populate(
           "claimedBy",
+          "name email role"
+        );
+
+    // =========================
+    // POPULATE CLAIM
+    // =========================
+
+    const populatedClaim =
+      await Claim.findById(
+        claim._id
+      )
+        .populate(
+          "donation",
+          "foodType category quantity unit pickupLocation status"
+        )
+        .populate(
+          "ngo",
+          "name email role"
+        )
+        .populate(
+          "volunteer",
           "name email role"
         );
 
@@ -384,13 +547,27 @@ const claimDonation = async (req, res) => {
       success: true,
       message:
         "Donation claimed successfully",
-      donation: populatedDonation,
+
+      donation:
+        populatedDonation,
+
+      claim:
+        populatedClaim,
     });
   } catch (error) {
     console.error(
       "Claim Donation Error:",
       error
     );
+
+    // Duplicate claimId / duplicate DB error
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This donation has already been claimed",
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -417,32 +594,25 @@ const setDeliveryLocation = async (
     } = req.body;
 
     // =========================
-    // REQUIRED FIELDS
+    // VALIDATION
     // =========================
 
     if (
       !deliveryLocation ||
-      deliveryLatitude === undefined ||
-      deliveryLongitude === undefined
+      !deliveryLocation.trim()
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Delivery location and coordinates are required",
+          "Delivery location is required",
       });
     }
 
-    // =========================
-    // COORDINATE VALIDATION
-    // =========================
+    const lat =
+      Number(deliveryLatitude);
 
-    const lat = Number(
-      deliveryLatitude
-    );
-
-    const lng = Number(
-      deliveryLongitude
-    );
+    const lng =
+      Number(deliveryLongitude);
 
     if (
       Number.isNaN(lat) ||
@@ -493,7 +663,9 @@ const setDeliveryLocation = async (
     // STATUS CHECK
     // =========================
 
-    if (donation.status !== "CLAIMED") {
+    if (
+      donation.status !== "CLAIMED"
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -502,14 +674,17 @@ const setDeliveryLocation = async (
     }
 
     // =========================
-    // SAVE DELIVERY LOCATION
+    // SAVE LOCATION
     // =========================
 
     donation.deliveryLocation =
       deliveryLocation.trim();
 
-    donation.deliveryLatitude = lat;
-    donation.deliveryLongitude = lng;
+    donation.deliveryLatitude =
+      lat;
+
+    donation.deliveryLongitude =
+      lng;
 
     await donation.save();
 
@@ -523,7 +698,7 @@ const setDeliveryLocation = async (
       )
         .populate(
           "donor",
-          "name email"
+          "name email role"
         )
         .populate(
           "claimedBy",
@@ -548,7 +723,8 @@ const setDeliveryLocation = async (
       success: true,
       message:
         "Delivery location updated successfully",
-      donation: populatedDonation,
+      donation:
+        populatedDonation,
     });
   } catch (error) {
     console.error(
@@ -592,7 +768,9 @@ const pickupDonation = async (
     // STATUS CHECK
     // =========================
 
-    if (donation.status !== "CLAIMED") {
+    if (
+      donation.status !== "CLAIMED"
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -606,8 +784,10 @@ const pickupDonation = async (
 
     if (
       !donation.deliveryLocation ||
-      donation.deliveryLatitude === null ||
-      donation.deliveryLongitude === null
+      donation.deliveryLatitude ===
+        null ||
+      donation.deliveryLongitude ===
+        null
     ) {
       return res.status(400).json({
         success: false,
@@ -633,13 +813,47 @@ const pickupDonation = async (
     }
 
     // =========================
-    // PICKUP
+    // UPDATE DONATION
     // =========================
 
-    donation.status = "PICKED_UP";
-    donation.pickedUpAt = new Date();
+    donation.status =
+      "PICKED_UP";
+
+    donation.pickedUpAt =
+      new Date();
 
     await donation.save();
+
+    // =========================
+    // UPDATE CLAIM
+    // =========================
+
+    const claim =
+      await Claim.findOne({
+        donation: donation._id,
+
+        $or: [
+          {
+            ngo: req.user.id,
+          },
+          {
+            volunteer: req.user.id,
+          },
+        ],
+      });
+
+    if (claim) {
+      claim.status =
+        "PICKED_UP";
+
+      claim.deliveryStatus =
+        "Picked Up";
+
+      claim.pickedUpAt =
+        donation.pickedUpAt;
+
+      await claim.save();
+    }
 
     // =========================
     // POPULATE
@@ -651,7 +865,7 @@ const pickupDonation = async (
       )
         .populate(
           "donor",
-          "name email"
+          "name email role"
         )
         .populate(
           "claimedBy",
@@ -664,7 +878,7 @@ const pickupDonation = async (
 
     emitDonationEvent(
       req,
-      "donation:picked_up",
+      "donation:picked-up",
       populatedDonation
     );
 
@@ -675,8 +889,10 @@ const pickupDonation = async (
     return res.status(200).json({
       success: true,
       message:
-        "Donation marked as picked up",
-      donation: populatedDonation,
+        "Donation picked up successfully",
+
+      donation:
+        populatedDonation,
     });
   } catch (error) {
     console.error(
@@ -720,11 +936,14 @@ const deliverDonation = async (
     // STATUS CHECK
     // =========================
 
-    if (donation.status !== "PICKED_UP") {
+    if (
+      donation.status !==
+      "PICKED_UP"
+    ) {
       return res.status(400).json({
         success: false,
         message:
-          "Donation must be picked up first",
+          "Donation must be picked up before delivery",
       });
     }
 
@@ -750,8 +969,10 @@ const deliverDonation = async (
 
     if (
       !donation.deliveryLocation ||
-      donation.deliveryLatitude === null ||
-      donation.deliveryLongitude === null
+      donation.deliveryLatitude ===
+        null ||
+      donation.deliveryLongitude ===
+        null
     ) {
       return res.status(400).json({
         success: false,
@@ -764,10 +985,44 @@ const deliverDonation = async (
     // DELIVER
     // =========================
 
-    donation.status = "DELIVERED";
-    donation.deliveredAt = new Date();
+    donation.status =
+      "DELIVERED";
+
+    donation.deliveredAt =
+      new Date();
 
     await donation.save();
+
+    // =========================
+    // UPDATE CLAIM
+    // =========================
+
+    const claim =
+      await Claim.findOne({
+        donation: donation._id,
+
+        $or: [
+          {
+            ngo: req.user.id,
+          },
+          {
+            volunteer: req.user.id,
+          },
+        ],
+      });
+
+    if (claim) {
+      claim.status =
+        "DELIVERED";
+
+      claim.deliveryStatus =
+        "Delivered";
+
+      claim.deliveredAt =
+        donation.deliveredAt;
+
+      await claim.save();
+    }
 
     // =========================
     // POPULATE
@@ -779,7 +1034,7 @@ const deliverDonation = async (
       )
         .populate(
           "donor",
-          "name email"
+          "name email role"
         )
         .populate(
           "claimedBy",
@@ -804,7 +1059,9 @@ const deliverDonation = async (
       success: true,
       message:
         "Donation delivered successfully",
-      donation: populatedDonation,
+
+      donation:
+        populatedDonation,
     });
   } catch (error) {
     console.error(
@@ -828,31 +1085,91 @@ const getMyClaims = async (
   res
 ) => {
   try {
-    const donations =
-      await Donation.find({
-        claimedBy: req.user.id,
+    // =========================
+    // FIND CLAIMS
+    // =========================
+
+    const claims =
+      await Claim.find({
+        $or: [
+          {
+            ngo: req.user.id,
+          },
+          {
+            volunteer: req.user.id,
+          },
+        ],
       })
         .populate(
-          "donor",
-          "name email"
+          "donation"
         )
         .populate(
-          "claimedBy",
+          "ngo",
+          "name email role"
+        )
+        .populate(
+          "volunteer",
           "name email role"
         )
         .sort({
           createdAt: -1,
         });
 
+    // =========================
+    // KEEP OLD FRONTEND FORMAT
+    // =========================
+
+    const donations =
+      claims
+        .filter(
+          (claim) =>
+            claim.donation
+        )
+        .map((claim) => {
+          const donation =
+            claim.donation.toObject();
+
+          return {
+            ...donation,
+
+            // Existing frontend fields
+            claimId:
+              claim.claimId,
+
+            claimStatus:
+              claim.status,
+
+            deliveryStatus:
+              claim.deliveryStatus,
+
+            claimedQuantity:
+              claim.claimedQuantity,
+
+            claimCreatedAt:
+              claim.createdAt,
+          };
+        });
+
+    // =========================
+    // RESPONSE
+    // =========================
+
     return res.status(200).json({
       success: true,
-      count: donations.length,
+
+      count:
+        donations.length,
+
+      // Existing frontend
       donations,
+
+      // New database structure
+      claims,
     });
   } catch (error) {
     console.error(
-      "Get my claims error:",
-      error.message
+      "Get My Claims Error:",
+      error
     );
 
     return res.status(500).json({
@@ -871,9 +1188,9 @@ module.exports = {
   createDonation,
   getAvailableDonations,
   getMyDonations,
+  getMyClaims,
   claimDonation,
   setDeliveryLocation,
   pickupDonation,
   deliverDonation,
-  getMyClaims,
 };
