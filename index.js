@@ -49,8 +49,7 @@ console.log(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests without origin
-      // Example: Postman / server-to-server
+      // Postman / server-to-server
       if (!origin) {
         return callback(null, true);
       }
@@ -135,9 +134,7 @@ const io = new Server(server, {
         return callback(null, true);
       }
 
-      if (
-        allowedOrigins.includes(origin)
-      ) {
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
@@ -165,6 +162,10 @@ const io = new Server(server, {
   },
 });
 
+// =====================================================
+// MAKE SOCKET.IO AVAILABLE TO CONTROLLERS
+// =====================================================
+
 app.set("io", io);
 
 // =====================================================
@@ -172,8 +173,18 @@ app.set("io", io);
 // =====================================================
 
 io.on("connection", (socket) => {
+  console.log("");
   console.log(
-    "🟢 Socket connected:",
+    "========================================"
+  );
+  console.log(
+    "🟢 SOCKET CONNECTED"
+  );
+  console.log(
+    "========================================"
+  );
+  console.log(
+    "Socket ID:",
     socket.id
   );
 
@@ -194,16 +205,55 @@ io.on("connection", (socket) => {
     "donation:tracking-watch",
     ({ donationId }) => {
       if (!donationId) {
+        console.log(
+          "⚠️ tracking-watch received without donationId",
+          socket.id
+        );
+
         return;
       }
 
       const room =
-        `donation:${donationId}`;
+        `donation:${String(donationId)}`;
 
       socket.join(room);
 
+      console.log("");
       console.log(
-        `👀 Socket ${socket.id} is watching ${room}`
+        "👀 DONOR WATCHING DONATION"
+      );
+      console.log(
+        "Socket:",
+        socket.id
+      );
+      console.log(
+        "Donation:",
+        donationId
+      );
+      console.log(
+        "Room:",
+        room
+      );
+
+      const members =
+        io.sockets.adapter.rooms.get(
+          room
+        );
+
+      console.log(
+        "👥 Room members:",
+        members
+          ? Array.from(members)
+          : []
+      );
+
+      // Confirm room join to donor
+      socket.emit(
+        "donation:tracking-watch-confirmed",
+        {
+          donationId,
+          room,
+        }
       );
     }
   );
@@ -216,35 +266,71 @@ io.on("connection", (socket) => {
     "donation:tracking-start",
     ({ donationId }) => {
       if (!donationId) {
+        console.log(
+          "⚠️ tracking-start received without donationId",
+          socket.id
+        );
+
         return;
       }
 
       const room =
-        `donation:${donationId}`;
+        `donation:${String(donationId)}`;
 
-      // NGO joins donation room
+      // NGO / volunteer joins same room
       socket.join(room);
 
+      console.log("");
       console.log(
-        `📍 Tracking started: ${donationId}`
+        "========================================"
+      );
+      console.log(
+        "📍 LIVE TRACKING STARTED"
+      );
+      console.log(
+        "========================================"
+      );
+      console.log(
+        "NGO Socket:",
+        socket.id
+      );
+      console.log(
+        "Donation:",
+        donationId
+      );
+      console.log(
+        "Room:",
+        room
       );
 
+      const members =
+        io.sockets.adapter.rooms.get(
+          room
+        );
+
       console.log(
-        `👤 NGO socket ${socket.id} joined ${room}`
+        "👥 Room members:",
+        members
+          ? Array.from(members)
+          : []
       );
 
-      // Notify donor(s)
+      // Donor ko notify
       socket.to(room).emit(
         "donation:tracking-started",
         {
           donationId,
         }
       );
+
+      console.log(
+        "✅ tracking-started emitted"
+      );
     }
   );
 
   // ===================================================
-  // LOCATION UPDATE
+  // LIVE LOCATION UPDATE
   // ===================================================
 
   socket.on(
@@ -260,29 +346,105 @@ io.on("connection", (socket) => {
         latitude === undefined ||
         longitude === undefined
       ) {
+        console.log(
+          "⚠️ Invalid location update:",
+          {
+            socketId: socket.id,
+            donationId,
+            latitude,
+            longitude,
+          }
+        );
+
+        return;
+      }
+
+      const lat =
+        Number(latitude);
+
+      const lng =
+        Number(longitude);
+
+      const gpsAccuracy =
+        Number(accuracy) || 0;
+
+      // Validate GPS
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180
+      ) {
+        console.log(
+          "⚠️ Invalid GPS coordinates:",
+          {
+            lat,
+            lng,
+          }
+        );
+
         return;
       }
 
       const room =
-        `donation:${donationId}`;
+        `donation:${String(donationId)}`;
 
+      const members =
+        io.sockets.adapter.rooms.get(
+          room
+        );
+
+      console.log("");
       console.log(
-        `📍 Location update for ${donationId}:`,
-        latitude,
-        longitude,
-        `±${Math.round(
-          accuracy || 0
-        )}m`
+        "📍 LIVE LOCATION UPDATE"
+      );
+      console.log(
+        "Donation:",
+        donationId
+      );
+      console.log(
+        "NGO Socket:",
+        socket.id
+      );
+      console.log(
+        "Latitude:",
+        lat
+      );
+      console.log(
+        "Longitude:",
+        lng
+      );
+      console.log(
+        "Accuracy:",
+        gpsAccuracy
+      );
+      console.log(
+        "Room:",
+        room
+      );
+      console.log(
+        "👥 Room members:",
+        members
+          ? Array.from(members)
+          : []
       );
 
+      // Send to donor(s)
       socket.to(room).emit(
         "donation:location-updated",
         {
           donationId,
-          latitude,
-          longitude,
-          accuracy,
+          latitude: lat,
+          longitude: lng,
+          accuracy: gpsAccuracy,
+          timestamp: Date.now(),
         }
+      );
+
+      console.log(
+        "✅ location-updated emitted to room"
       );
     }
   );
@@ -295,12 +457,34 @@ io.on("connection", (socket) => {
     "donation:tracking-stop",
     ({ donationId }) => {
       if (!donationId) {
+        console.log(
+          "⚠️ tracking-stop without donationId"
+        );
+
         return;
       }
 
       const room =
-        `donation:${donationId}`;
+        `donation:${String(donationId)}`;
 
+      console.log("");
+      console.log(
+        "⛔ LIVE TRACKING STOPPED"
+      );
+      console.log(
+        "Donation:",
+        donationId
+      );
+      console.log(
+        "Socket:",
+        socket.id
+      );
+      console.log(
+        "Room:",
+        room
+      );
+
+      // Notify donor
       socket.to(room).emit(
         "donation:tracking-stopped",
         {
@@ -308,10 +492,11 @@ io.on("connection", (socket) => {
         }
       );
 
+      // NGO leaves room
       socket.leave(room);
 
       console.log(
-        `⛔ Tracking stopped: ${donationId}`
+        `⛔ Socket ${socket.id} left ${room}`
       );
     }
   );
@@ -320,29 +505,72 @@ io.on("connection", (socket) => {
   // DISCONNECT
   // ===================================================
 
-  socket.on("disconnect", () => {
-    console.log(
-      "🔴 Socket disconnected:",
-      socket.id
-    );
-  });
+  socket.on(
+    "disconnect",
+    (reason) => {
+      console.log("");
+      console.log(
+        "🔴 SOCKET DISCONNECTED"
+      );
+      console.log(
+        "Socket:",
+        socket.id
+      );
+      console.log(
+        "Reason:",
+        reason
+      );
+    }
+  );
 });
+
+// =====================================================
+// SERVER ERROR HANDLING
+// =====================================================
+
+server.on(
+  "error",
+  (error) => {
+    console.error(
+      "❌ Server error:",
+      error
+    );
+  }
+);
 
 // =====================================================
 // START SERVER
 // =====================================================
 
-server.listen(PORT, () => {
-  console.log(
-    `🚀 Server running on port ${PORT}`
-  );
+server.listen(
+  PORT,
+  () => {
+    console.log("");
+    console.log(
+      "========================================"
+    );
+    console.log(
+      "🚀 SMART FOOD WASTE BACKEND"
+    );
+    console.log(
+      "========================================"
+    );
 
-  console.log(
-    `🔌 Socket.IO running on port ${PORT}`
-  );
+    console.log(
+      `🚀 Server running on port ${PORT}`
+    );
 
-  console.log(
-    "🌐 Allowed origins:",
-    allowedOrigins
-  );
-});
+    console.log(
+      `🔌 Socket.IO running on port ${PORT}`
+    );
+
+    console.log(
+      "🌐 Allowed origins:",
+      allowedOrigins
+    );
+
+    console.log(
+      "========================================"
+    );
+  }
+);
